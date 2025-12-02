@@ -71,7 +71,7 @@ function App() {
     // 2. Vercel 환경변수에서 가져온 "기본 설정" (손님용)
     // ★ 중요: 아래 빈칸('')에 본인의 Firebase 값들을 채워 넣으세요! (API Key 빼고)
     const envConfig = {
-      apiKey: process.env.GEMINI_API_KEY, 
+      apiKey: import.meta.env.VITE_GEMINI_API_KEY,
       authDomain: "studyapp-46ed4.firebaseapp.com", // 예: project-id.firebaseapp.com
       projectId: "studyapp-46ed4",                // 예: project-id
       storageBucket: "studyapp-46ed4.firebasestorage.app", // 예: project-id.appspot.com
