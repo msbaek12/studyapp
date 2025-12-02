@@ -1,9 +1,10 @@
 
 export interface Group {
-  id: string;
+  id: string; // This is now the Random Code
   name: string;
   color: string;
   password?: string;
+  ownerId: string; // ID of the creator
 }
 
 export interface Member {
