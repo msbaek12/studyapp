@@ -89,7 +89,7 @@ export const TimerDisplay: React.FC<TimerDisplayProps> = ({
       }`}>
         <Clock size={16} />
         <span className="text-sm font-semibold tracking-wide">
-            {hasDistraction ? '연대 책임 발동 (랭킹 집계 중단)' : '연대 책임 타이머 작동 중'}
+            {hasDistraction ? '연대 책임 발동 (타이머 정지됨)' : '연대 책임 타이머 작동 중'}
         </span>
       </div>
     </div>

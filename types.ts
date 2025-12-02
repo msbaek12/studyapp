@@ -40,5 +40,4 @@ export enum TabType {
   CALENDAR = '캘린더',
   TIMETABLE = '시간표',
   TODO = '투두',
-  RANKING = '랭킹',
 }
