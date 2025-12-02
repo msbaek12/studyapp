@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { Eye, Users } from 'lucide-react';
+import { Eye, Users, Settings } from 'lucide-react';
 
 interface LoginScreenProps {
   onLogin: (name: string, groupName: string, avatarSeed: string) => void;
+  onResetConfig: () => void;
 }
 
 const AVATAR_SEEDS = ['Felix', 'Aneka', 'Sarah', 'Micah', 'Jessica', 'Jon', 'Bear', 'Fox', 'Cat'];
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onResetConfig }) => {
   const [name, setName] = useState('');
   const [groupName, setGroupName] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATAR_SEEDS[0]);
@@ -20,7 +21,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4 relative">
+      {/* Reset Config Button */}
+      <button 
+        onClick={onResetConfig}
+        className="absolute top-4 right-4 text-gray-500 hover:text-white flex items-center gap-1 bg-gray-800/50 hover:bg-gray-700 px-3 py-2 rounded-lg transition-colors border border-gray-700"
+        title="잘못된 설정 초기화"
+      >
+        <Settings size={16} />
+        <span className="text-xs font-bold">설정 초기화</span>
+      </button>
+
       <div className="w-full max-w-md bg-gray-800 p-8 rounded-2xl border border-gray-700 shadow-2xl animate-in fade-in slide-in-from-bottom-10">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-2">

@@ -19,7 +19,7 @@ import {
   getFirestore, 
   doc, 
   setDoc, 
-  getDoc,
+  getDoc, 
   updateDoc, 
   onSnapshot, 
   collection, 
@@ -54,13 +54,21 @@ function App() {
   const [timerSeconds, setTimerSeconds] = useState(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
+  // --- FORCE RESET HANDLER ---
+  const handleForceReset = () => {
+    localStorage.removeItem('sb_firebase_config');
+    window.location.reload();
+  };
+
   // --- INITIALIZATION ---
   useEffect(() => {
-    // 1. Check LocalStorage for Config
     const storedConfig = localStorage.getItem('sb_firebase_config');
     if (storedConfig) {
         try {
             const config = JSON.parse(storedConfig);
+            // Basic validation
+            if (!config.apiKey || !config.projectId) throw new Error("Invalid Config");
+
             if (!getApps().length) {
                 const app = initializeApp(config);
                 setFirebaseApp(app);
@@ -72,13 +80,15 @@ function App() {
             }
         } catch (e) {
             console.error("Firebase Init Error", e);
+            // Auto-wipe bad config and show screen
+            localStorage.removeItem('sb_firebase_config');
             setConfigMissing(true);
         }
     } else {
         setConfigMissing(true);
     }
 
-    // 2. Restore User Session
+    // Restore User Session
     const storedId = localStorage.getItem('sb_user_id');
     const storedName = localStorage.getItem('sb_user_name');
     const storedAvatar = localStorage.getItem('sb_user_avatar');
@@ -97,30 +107,35 @@ function App() {
 
   const handleSaveConfig = (config: any) => {
     localStorage.setItem('sb_firebase_config', JSON.stringify(config));
-    window.location.reload(); // Reload to init firebase
+    window.location.reload(); 
+  };
+
+  const handleResetConfig = () => {
+     localStorage.removeItem('sb_firebase_config');
+     window.location.reload();
   };
 
   // --- REAL-TIME SYNC ---
 
-  // 1. Sync Groups List (Ideally, a user only sees groups they joined. 
-  // For simplicity, we just sync the CURRENT group doc if active)
   useEffect(() => {
     if (!db || !activeGroupId) return;
 
-    // We can't easily query "all groups I'm in" without a user-groups collection.
-    // So we will just fetch the current group details.
     const groupRef = doc(db, 'groups', activeGroupId);
     const unsub = onSnapshot(groupRef, (doc) => {
         if (doc.exists()) {
-            // We put it in an array to fit current UI structure
             setGroups([{ id: doc.id, ...doc.data() } as Group]);
         }
+    }, (error) => {
+        console.error("Group Sync Error:", error);
+        // If we get a permission/auth error, likely bad config. 
+        // Force reset to config screen.
+        localStorage.removeItem('sb_firebase_config');
+        setConfigMissing(true);
     });
     return () => unsub();
   }, [db, activeGroupId]);
 
 
-  // 2. Sync Members
   useEffect(() => {
     if (!db || !activeGroupId) return;
     const membersRef = collection(db, 'groups', activeGroupId, 'members');
@@ -128,11 +143,12 @@ function App() {
         const list: Member[] = [];
         snapshot.forEach((d) => list.push({ id: d.id, ...d.data() } as Member));
         setMembers(list);
+    }, (error) => {
+         console.error("Member Sync Error:", error);
     });
     return () => unsub();
   }, [db, activeGroupId]);
 
-  // 3. Sync Timetables
   useEffect(() => {
       if (!db || !activeGroupId) return;
       const ttRef = collection(db, 'groups', activeGroupId, 'timetables');
@@ -149,7 +165,6 @@ function App() {
       return () => unsub();
   }, [db, activeGroupId]);
 
-  // 4. Sync Todos
   useEffect(() => {
     if (!db || !activeGroupId) return;
     const todoRef = collection(db, 'groups', activeGroupId, 'todos');
@@ -168,14 +183,10 @@ function App() {
 
 
   // --- LOGIC ---
-
   const currentGroupMembers = members;
-  // If ANYONE is distracted, timer stops for everyone in the group logic
   const distractedMember = currentGroupMembers.find(m => m.status === 'distracted');
-  // Timer runs only if there are members and no one is distracted
-  const isTimerRunning = !distractedMember && currentGroupMembers.length > 0 && isLocked; // Local lock is also required to "participate"
+  const isTimerRunning = !distractedMember && currentGroupMembers.length > 0 && isLocked;
 
-  // Local timer effect (Just for visual, doesn't sync precise seconds to DB to save writes)
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (isTimerRunning) {
@@ -186,11 +197,10 @@ function App() {
     return () => clearInterval(interval);
   }, [isTimerRunning]);
 
-  // Wake Lock & Visibility
   useEffect(() => {
     const handleVisChange = () => {
         if (document.visibilityState === 'hidden' && isLocked) {
-             toggleLock(true); // Force unlock with penalty
+             toggleLock(true); 
         }
     };
     document.addEventListener('visibilitychange', handleVisChange);
@@ -199,9 +209,9 @@ function App() {
 
   useEffect(() => {
     if (isLocked) {
-        if ('wakeLock' in navigator) navigator.wakeLock.request('screen').then(l => { wakeLockRef.current = l; });
+        if ('wakeLock' in navigator) navigator.wakeLock.request('screen').then(l => { wakeLockRef.current = l; }).catch(() => {});
     } else {
-        wakeLockRef.current?.release();
+        wakeLockRef.current?.release().catch(() => {});
     }
   }, [isLocked]);
 
@@ -209,46 +219,53 @@ function App() {
   // --- ACTIONS ---
 
   const handleLogin = async (name: string, groupName: string, avatarSeed: string) => {
-      if (!db) return;
-      
-      const newUserId = myId || `user-${Date.now()}-${Math.floor(Math.random()*1000)}`;
-      
-      // 1. Group Logic
-      const groupRef = doc(db, 'groups', groupName);
-      const groupSnap = await getDoc(groupRef);
-      
-      if (!groupSnap.exists()) {
-          // Create Group
-          await setDoc(groupRef, {
-              name: groupName,
-              color: '#' + Math.floor(Math.random()*16777215).toString(16),
-              createdAt: serverTimestamp()
-          });
+      if (!db) {
+          // If DB is missing here, something is wrong with init. Force reset.
+          handleForceReset();
+          return;
       }
+      
+      try {
+          const newUserId = myId || `user-${Date.now()}-${Math.floor(Math.random()*1000)}`;
+          
+          const groupRef = doc(db, 'groups', groupName);
+          const groupSnap = await getDoc(groupRef);
+          
+          if (!groupSnap.exists()) {
+              await setDoc(groupRef, {
+                  name: groupName,
+                  color: '#' + Math.floor(Math.random()*16777215).toString(16),
+                  createdAt: serverTimestamp()
+              });
+          }
 
-      // 2. Member Join
-      const memberRef = doc(db, 'groups', groupName, 'members', newUserId);
-      await setDoc(memberRef, {
-          id: newUserId,
-          name: name,
-          avatarSeed: avatarSeed,
-          status: 'distracted', // Start distracted until they lock
-          message: '입장함',
-          groupId: groupName,
-          joinedAt: serverTimestamp()
-      }, { merge: true });
+          const memberRef = doc(db, 'groups', groupName, 'members', newUserId);
+          await setDoc(memberRef, {
+              id: newUserId,
+              name: name,
+              avatarSeed: avatarSeed,
+              status: 'distracted', 
+              message: '입장함',
+              groupId: groupName,
+              joinedAt: serverTimestamp()
+          }, { merge: true });
 
-      // Local State
-      setMyId(newUserId);
-      setMyName(name);
-      setMyAvatar(avatarSeed);
-      setActiveGroupId(groupName);
-      setSelectedMemberId(newUserId);
+          setMyId(newUserId);
+          setMyName(name);
+          setMyAvatar(avatarSeed);
+          setActiveGroupId(groupName);
+          setSelectedMemberId(newUserId);
 
-      localStorage.setItem('sb_user_id', newUserId);
-      localStorage.setItem('sb_user_name', name);
-      localStorage.setItem('sb_user_avatar', avatarSeed);
-      localStorage.setItem('sb_active_group', groupName);
+          localStorage.setItem('sb_user_id', newUserId);
+          localStorage.setItem('sb_user_name', name);
+          localStorage.setItem('sb_user_avatar', avatarSeed);
+          localStorage.setItem('sb_active_group', groupName);
+      } catch (error) {
+          console.error("Login Error:", error);
+          if (window.confirm("데이터베이스 연결에 실패했습니다. 설정(API Key)이 올바르지 않을 수 있습니다.\n설정을 초기화하시겠습니까?")) {
+              handleForceReset();
+          }
+      }
   };
 
   const toggleLock = async (forceUnlock = false) => {
@@ -261,27 +278,27 @@ function App() {
 
       const memberRef = doc(db, 'groups', activeGroupId, 'members', myId);
       
-      if (newLockedState) {
-          // Locked -> FOCUS
-          await updateDoc(memberRef, {
-              status: 'focus',
-              message: '🔥 열공중'
-          });
-      } else {
-          // Unlocked -> DISTRACTED
-          const apps = ['유튜브', '인스타', '카카오톡', '웹툰', '넷플릭스', '게임', '틱톡'];
-          const randomApp = apps[Math.floor(Math.random() * apps.length)];
-          const reason = forceUnlock ? `앱 이탈 감지됨 (${randomApp}?)` : `딴짓 감지됨 (${randomApp})`;
-          
-          await updateDoc(memberRef, {
-              status: 'distracted',
-              message: `🚨 ${reason}`
-          });
+      try {
+        if (newLockedState) {
+            await updateDoc(memberRef, {
+                status: 'focus',
+                message: '🔥 열공중'
+            });
+        } else {
+            const apps = ['유튜브', '인스타', '카카오톡', '웹툰', '넷플릭스', '게임', '틱톡'];
+            const randomApp = apps[Math.floor(Math.random() * apps.length)];
+            const reason = forceUnlock ? `앱 이탈 감지됨 (${randomApp}?)` : `딴짓 감지됨 (${randomApp})`;
+            
+            await updateDoc(memberRef, {
+                status: 'distracted',
+                message: `🚨 ${reason}`
+            });
+        }
+      } catch (e) {
+          console.error("Status Update Failed", e);
       }
   };
 
-  // --- CRUD (Timetable / Todo / Group) ---
-  
   // TIMETABLE
   const handleAddTimetable = async (start: string, end: string, subj: string) => {
       if (!db || !activeGroupId || !myId) return;
@@ -316,7 +333,6 @@ function App() {
   };
   const handleToggleTodo = async (uid: string, todoId: string) => {
      if (uid !== myId) return; 
-     // We need to find current status. We have it in state 'todos'
      const item = todos[myId]?.find(t => t.id === todoId);
      if (item && db && activeGroupId) {
          await updateDoc(doc(db, 'groups', activeGroupId, 'todos', todoId), {
@@ -333,21 +349,13 @@ function App() {
       await deleteDoc(doc(db, 'groups', activeGroupId, 'todos', id));
   };
 
-  // GROUP Update (Rename)
   const handleUpdateGroup = async (id: string, name: string) => {
-      // NOTE: Changing ID in firestore is hard. We just change display name field.
-      // But our ID IS the name currently. 
-      // For this simple app, we will just update the 'name' field, 
-      // but keeping ID same means new users must join with OLD name.
-      // Better to just update display props.
       if (!db) return;
       await updateDoc(doc(db, 'groups', id), { name });
   };
   const handleDeleteGroup = async (id: string) => {
-      // Allow deleting group doc. Subcollections might persist but become orphaned in Firestore.
       if (!db) return;
       await deleteDoc(doc(db, 'groups', id));
-      // Reset local state
       setActiveGroupId('');
       localStorage.removeItem('sb_active_group');
       window.location.reload();
@@ -356,34 +364,45 @@ function App() {
 
   // --- RENDER ---
 
+  // HARD RESET BUTTON (ALWAYS VISIBLE)
+  const ResetButton = (
+      <button 
+        onClick={handleForceReset}
+        className="fixed bottom-4 right-4 z-[9999] bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-2 rounded shadow-lg border border-red-400"
+        title="문제가 발생했을 때 누르세요"
+      >
+        API KEY RESET
+      </button>
+  );
+
   if (configMissing) {
-      return <ConfigScreen onSaveConfig={handleSaveConfig} />;
+      return (
+        <>
+            <ConfigScreen onSaveConfig={handleSaveConfig} />
+            {ResetButton}
+        </>
+      );
   }
 
   if (!myId || !activeGroupId) {
-    return <LoginScreen onLogin={handleLogin} />;
+    return (
+        <>
+            <LoginScreen onLogin={handleLogin} onResetConfig={handleResetConfig} />
+            {ResetButton}
+        </>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6 max-w-md mx-auto">
+    <div className="min-h-screen bg-gray-900 text-white p-6 max-w-md mx-auto relative pb-20">
       <Header />
       
-      {activeTab === TabType.CALENDAR ? (
-           <GroupCalendar groups={groups} />
-      ) : (
-           <GroupCalendar groups={groups} /> // Show condensed calendar on top? or separate? Request said separate tab.
-           // Wait, request said "Calendar is a new tab". 
-           // But previously "Calendar position ... moved to top".
-           // Then "Calendar is new tab".
-           // I will hide it here if activeTab is Calendar, show it inside main content.
-      )}
-
       {activeTab !== TabType.CALENDAR && (
         <GroupHeader 
             groups={groups} 
             activeGroupId={activeGroupId}
-            onSelectGroup={(id) => setActiveGroupId(id)} // Simple switch if we had multiple
-            onCreateGroup={(name) => handleLogin(myName, name, myAvatar)} // Reuse login logic to join/create new
+            onSelectGroup={(id) => setActiveGroupId(id)} 
+            onCreateGroup={(name) => handleLogin(myName, name, myAvatar)}
             onUpdateGroup={handleUpdateGroup}
             onDeleteGroup={handleDeleteGroup}
         />
@@ -410,8 +429,8 @@ function App() {
 
             <MemberList 
               members={members}
-              onAddMember={() => {}} // Deprecated
-              onRemoveMember={() => {}} // Logic complicated for realtime
+              onAddMember={() => {}} 
+              onRemoveMember={() => {}}
               currentUserId={myId}
               groupName={activeGroupId}
             />
@@ -449,6 +468,8 @@ function App() {
           />
         )}
       </main>
+
+      {ResetButton}
     </div>
   );
 }
