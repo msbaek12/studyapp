@@ -72,9 +72,9 @@ function App() {
     // ★ 중요: 아래 빈칸('')에 본인의 Firebase 값들을 채워 넣으세요! (API Key 빼고)
     const envConfig = {
       apiKey: process.env.GEMINI_API_KEY, 
-      authDomain: "studyapp-46cd4.firebaseapp.com", // 예: project-id.firebaseapp.com
-      projectId: "studyapp-46cd4",                // 예: project-id
-      storageBucket: "studyapp-46cd4.appspot.com", // 예: project-id.appspot.com
+      authDomain: "studyapp-46ed4.firebaseapp.com", // 예: project-id.firebaseapp.com
+      projectId: "studyapp-46ed4",                // 예: project-id
+      storageBucket: "studyapp-46ed4.firebasestorage.app", // 예: project-id.appspot.com
       messagingSenderId: "927515414304",        // Firebase 콘솔에서 복사
       appId: "1:927515414304:web:6c500cae3ed68de920d145"                        // Firebase 콘솔에서 복사
     };
