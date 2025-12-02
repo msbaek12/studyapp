@@ -1,4 +1,4 @@
-
+/// <reference types="vite/client" />
 import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { GroupHeader } from './components/GroupHeader';
@@ -31,7 +31,7 @@ function App() {
   // --- STATE ---
   const [firebaseApp, setFirebaseApp] = useState<any>(null);
   const [db, setDb] = useState<any>(null);
-  const [configMissing, setConfigMissing] = useState(false);
+  const [configMissing, setConfigMissing] = useState(true); // Default to true, strictly check init
   const [connectionError, setConnectionError] = useState(false);
 
   // Auth & User
@@ -61,6 +61,7 @@ function App() {
     localStorage.removeItem('sb_firebase_config');
     localStorage.removeItem('sb_active_group');
     localStorage.removeItem('sb_my_groups');
+    localStorage.removeItem('sb_user_id');
     window.location.reload();
   };
 
@@ -68,33 +69,60 @@ function App() {
      localStorage.removeItem('sb_firebase_config');
      setConfigMissing(true);
      setConnectionError(false);
+     window.location.reload();
   };
 
   // --- INITIALIZATION ---
   useEffect(() => {
-    const storedConfig = localStorage.getItem('sb_firebase_config');
-    if (storedConfig) {
-        try {
-            const config = JSON.parse(storedConfig);
-            if (!config.apiKey || !config.projectId) throw new Error("Invalid Config");
+    const initFirebase = () => {
+        let config;
+        let usingEnv = false;
 
-            if (!getApps().length) {
-                const app = initializeApp(config);
-                setFirebaseApp(app);
-                setDb(getFirestore(app));
-            } else {
-                const app = getApp();
-                setFirebaseApp(app);
-                setDb(getFirestore(app));
+        // 1. Check Environment Variables (Vercel/Vite)
+        if (import.meta.env.VITE_FIREBASE_API_KEY) {
+            config = {
+                apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+                authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+                projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+                storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+                messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+                appId: import.meta.env.VITE_FIREBASE_APP_ID
+            };
+            usingEnv = true;
+        } 
+        // 2. Fallback to LocalStorage
+        else {
+            const storedConfig = localStorage.getItem('sb_firebase_config');
+            if (storedConfig) {
+                config = JSON.parse(storedConfig);
             }
-        } catch (e) {
-            console.error("Firebase Init Error", e);
-            localStorage.removeItem('sb_firebase_config');
+        }
+
+        if (config && config.apiKey) {
+            try {
+                if (!getApps().length) {
+                    const app = initializeApp(config);
+                    setFirebaseApp(app);
+                    setDb(getFirestore(app));
+                } else {
+                    const app = getApp();
+                    setFirebaseApp(app);
+                    setDb(getFirestore(app));
+                }
+                setConfigMissing(false);
+            } catch (e) {
+                console.error("Firebase Init Error", e);
+                if (!usingEnv) {
+                    localStorage.removeItem('sb_firebase_config');
+                    setConfigMissing(true);
+                }
+            }
+        } else {
             setConfigMissing(true);
         }
-    } else {
-        setConfigMissing(true);
-    }
+    };
+
+    initFirebase();
 
     // Restore User Session
     const storedId = localStorage.getItem('sb_user_id');
@@ -133,10 +161,6 @@ function App() {
         return;
     }
 
-    // Create a listener for EACH group I am in. 
-    // Optimization: In a larger app, we might query 'groups' where 'members' contains me, 
-    // but Firestore structure is 'groups/{id}/members/{id}'.
-    // So distinct listeners for myGroupIds is the correct client-side approach here.
     const unsubscribes = myGroupIds.map(gid => {
         return onSnapshot(doc(db, 'groups', gid), (doc) => {
             if (doc.exists()) {
@@ -145,7 +169,6 @@ function App() {
                     return [...filtered, { id: doc.id, ...doc.data() } as Group];
                 });
             } else {
-                // Group might be deleted
                 setGroups(prev => prev.filter(g => g.id !== gid));
             }
         }, (error) => {
@@ -246,7 +269,6 @@ function App() {
 
   // --- ACTIONS ---
 
-  // Helper to add group to local list
   const addToMyGroups = (groupId: string) => {
       setMyGroupIds(prev => {
           if (prev.includes(groupId)) return prev;
@@ -272,7 +294,7 @@ function App() {
               // CREATE NEW GROUP
               await setDoc(groupRef, {
                   name: groupName,
-                  password: groupPassword, // Store simple password
+                  password: groupPassword, 
                   color: '#' + Math.floor(Math.random()*16777215).toString(16),
                   createdAt: serverTimestamp()
               });
@@ -281,7 +303,7 @@ function App() {
               const groupData = groupSnap.data();
               if (groupData.password !== groupPassword) {
                   alert("그룹 비밀번호가 일치하지 않습니다.");
-                  return; // Stop execution
+                  return;
               }
           }
 
@@ -315,7 +337,7 @@ function App() {
           if (error.code === 'permission-denied' || error.code === 'unavailable') {
              setConnectionError(true);
           } else {
-              alert("로그인 중 오류가 발생했습니다: " + error.message);
+              alert("로그인/그룹 입장 중 오류가 발생했습니다.\n" + error.message);
           }
       }
   };
@@ -406,13 +428,11 @@ function App() {
       await updateDoc(doc(db, 'groups', id), { name });
   };
   
-  // "Delete" for user means "Leave" locally
   const handleDeleteGroup = async (id: string) => {
       const updated = myGroupIds.filter(gid => gid !== id);
       setMyGroupIds(updated);
       localStorage.setItem('sb_my_groups', JSON.stringify(updated));
 
-      // If active group was deleted
       if (activeGroupId === id) {
           if (updated.length > 0) {
               setActiveGroupId(updated[0]);
@@ -420,7 +440,7 @@ function App() {
           } else {
               setActiveGroupId('');
               localStorage.removeItem('sb_active_group');
-              window.location.reload(); // Force re-login if no groups
+              window.location.reload(); 
           }
       }
   };
@@ -428,7 +448,6 @@ function App() {
 
   // --- RENDER ---
 
-  // HARD RESET BUTTON
   const ResetButton = (
       <button 
         onClick={handleForceReset}
@@ -444,12 +463,15 @@ function App() {
       return (
           <div className="fixed inset-0 bg-gray-900 z-[9999] flex flex-col items-center justify-center p-6 text-center">
               <h1 className="text-2xl font-bold text-red-500 mb-4">데이터베이스 연결 오류</h1>
-              <p className="text-gray-300 mb-6">API Key가 잘못되었거나 Firestore 권한이 없습니다.<br/>(규칙이 allow read, write: if true; 인지 확인하세요)</p>
+              <p className="text-gray-300 mb-6">
+                API Key가 잘못되었거나 Firestore 권한이 없습니다.<br/>
+                Vercel 환경 변수 또는 입력한 키를 확인하세요.
+              </p>
               <button 
                 onClick={handleResetConfig}
                 className="bg-white text-gray-900 font-bold px-6 py-3 rounded-xl hover:bg-gray-200"
               >
-                  API 키 다시 입력하기
+                  설정 다시 입력하기 (초기화)
               </button>
           </div>
       );
@@ -552,7 +574,8 @@ function App() {
         )}
       </main>
 
-      {ResetButton}
+      {/* Show reset button only if not using env vars (optional, but good for debugging) */}
+      {!import.meta.env.VITE_FIREBASE_API_KEY && ResetButton}
     </div>
   );
 }
