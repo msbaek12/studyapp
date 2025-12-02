@@ -47,7 +47,7 @@ export const ConfigScreen: React.FC<ConfigScreenProps> = ({ onSaveConfig }) => {
             <AlertCircle className="text-yellow-500 w-5 h-5 flex-shrink-0 mt-0.5" />
             <div className="text-xs text-yellow-200">
                 <strong>설정 방법:</strong><br/>
-                1. Firebase 프로젝트 생성 -> 웹 앱 추가<br/>
+                1. Firebase 프로젝트 생성 &rarr; 웹 앱 추가<br/>
                 2. `firebaseConfig` 객체 내용 복사해서 아래 입력<br/>
                 3. Firestore Database 생성 (규칙: test mode)
             </div>
