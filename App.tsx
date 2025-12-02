@@ -32,15 +32,17 @@ function App() {
   const [firebaseApp, setFirebaseApp] = useState<any>(null);
   const [db, setDb] = useState<any>(null);
   const [configMissing, setConfigMissing] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
 
   // Auth & User
   const [myId, setMyId] = useState<string | null>(null);
   const [myName, setMyName] = useState<string>('');
   const [myAvatar, setMyAvatar] = useState<string>('');
   
-  // App Data
+  // Group Data
   const [activeGroupId, setActiveGroupId] = useState<string>('');
-  const [groups, setGroups] = useState<Group[]>([]); // Synced from DB
+  const [myGroupIds, setMyGroupIds] = useState<string[]>([]); // List of IDs I've joined
+  const [groups, setGroups] = useState<Group[]>([]); // Data for myGroupIds
   
   const [activeTab, setActiveTab] = useState<TabType>(TabType.GROUP);
   const [isLocked, setIsLocked] = useState(false);
@@ -57,7 +59,15 @@ function App() {
   // --- FORCE RESET HANDLER ---
   const handleForceReset = () => {
     localStorage.removeItem('sb_firebase_config');
+    localStorage.removeItem('sb_active_group');
+    localStorage.removeItem('sb_my_groups');
     window.location.reload();
+  };
+
+  const handleResetConfig = () => {
+     localStorage.removeItem('sb_firebase_config');
+     setConfigMissing(true);
+     setConnectionError(false);
   };
 
   // --- INITIALIZATION ---
@@ -66,7 +76,6 @@ function App() {
     if (storedConfig) {
         try {
             const config = JSON.parse(storedConfig);
-            // Basic validation
             if (!config.apiKey || !config.projectId) throw new Error("Invalid Config");
 
             if (!getApps().length) {
@@ -80,7 +89,6 @@ function App() {
             }
         } catch (e) {
             console.error("Firebase Init Error", e);
-            // Auto-wipe bad config and show screen
             localStorage.removeItem('sb_firebase_config');
             setConfigMissing(true);
         }
@@ -93,11 +101,17 @@ function App() {
     const storedName = localStorage.getItem('sb_user_name');
     const storedAvatar = localStorage.getItem('sb_user_avatar');
     const storedActiveGroup = localStorage.getItem('sb_active_group');
+    const storedMyGroups = localStorage.getItem('sb_my_groups');
 
     if (storedId && storedName && storedAvatar) {
         setMyId(storedId);
         setMyName(storedName);
         setMyAvatar(storedAvatar);
+        
+        if (storedMyGroups) {
+            setMyGroupIds(JSON.parse(storedMyGroups));
+        }
+
         if (storedActiveGroup) {
             setActiveGroupId(storedActiveGroup);
             setSelectedMemberId(storedId);
@@ -110,32 +124,43 @@ function App() {
     window.location.reload(); 
   };
 
-  const handleResetConfig = () => {
-     localStorage.removeItem('sb_firebase_config');
-     window.location.reload();
-  };
-
   // --- REAL-TIME SYNC ---
 
+  // 1. Sync "My Groups" List
   useEffect(() => {
-    if (!db || !activeGroupId) return;
+    if (!db || myGroupIds.length === 0) {
+        setGroups([]);
+        return;
+    }
 
-    const groupRef = doc(db, 'groups', activeGroupId);
-    const unsub = onSnapshot(groupRef, (doc) => {
-        if (doc.exists()) {
-            setGroups([{ id: doc.id, ...doc.data() } as Group]);
-        }
-    }, (error) => {
-        console.error("Group Sync Error:", error);
-        // If we get a permission/auth error, likely bad config. 
-        // Force reset to config screen.
-        localStorage.removeItem('sb_firebase_config');
-        setConfigMissing(true);
+    // Create a listener for EACH group I am in. 
+    // Optimization: In a larger app, we might query 'groups' where 'members' contains me, 
+    // but Firestore structure is 'groups/{id}/members/{id}'.
+    // So distinct listeners for myGroupIds is the correct client-side approach here.
+    const unsubscribes = myGroupIds.map(gid => {
+        return onSnapshot(doc(db, 'groups', gid), (doc) => {
+            if (doc.exists()) {
+                setGroups(prev => {
+                    const filtered = prev.filter(g => g.id !== gid);
+                    return [...filtered, { id: doc.id, ...doc.data() } as Group];
+                });
+            } else {
+                // Group might be deleted
+                setGroups(prev => prev.filter(g => g.id !== gid));
+            }
+        }, (error) => {
+            console.error("Group Sync Error", error);
+            if (error.code === 'permission-denied' || error.code === 'unavailable') {
+                setConnectionError(true);
+            }
+        });
     });
-    return () => unsub();
-  }, [db, activeGroupId]);
+
+    return () => unsubscribes.forEach(u => u());
+  }, [db, myGroupIds]);
 
 
+  // 2. Sync Members of ACTIVE Group
   useEffect(() => {
     if (!db || !activeGroupId) return;
     const membersRef = collection(db, 'groups', activeGroupId, 'members');
@@ -145,10 +170,12 @@ function App() {
         setMembers(list);
     }, (error) => {
          console.error("Member Sync Error:", error);
+         if (error.code === 'permission-denied') setConnectionError(true);
     });
     return () => unsub();
   }, [db, activeGroupId]);
 
+  // 3. Sync Timetables
   useEffect(() => {
       if (!db || !activeGroupId) return;
       const ttRef = collection(db, 'groups', activeGroupId, 'timetables');
@@ -165,6 +192,7 @@ function App() {
       return () => unsub();
   }, [db, activeGroupId]);
 
+  // 4. Sync Todos
   useEffect(() => {
     if (!db || !activeGroupId) return;
     const todoRef = collection(db, 'groups', activeGroupId, 'todos');
@@ -218,10 +246,19 @@ function App() {
 
   // --- ACTIONS ---
 
-  const handleLogin = async (name: string, groupName: string, avatarSeed: string) => {
+  // Helper to add group to local list
+  const addToMyGroups = (groupId: string) => {
+      setMyGroupIds(prev => {
+          if (prev.includes(groupId)) return prev;
+          const updated = [...prev, groupId];
+          localStorage.setItem('sb_my_groups', JSON.stringify(updated));
+          return updated;
+      });
+  };
+
+  const handleLogin = async (name: string, groupName: string, groupPassword: string, avatarSeed: string) => {
       if (!db) {
-          // If DB is missing here, something is wrong with init. Force reset.
-          handleForceReset();
+          setConnectionError(true);
           return;
       }
       
@@ -232,13 +269,23 @@ function App() {
           const groupSnap = await getDoc(groupRef);
           
           if (!groupSnap.exists()) {
+              // CREATE NEW GROUP
               await setDoc(groupRef, {
                   name: groupName,
+                  password: groupPassword, // Store simple password
                   color: '#' + Math.floor(Math.random()*16777215).toString(16),
                   createdAt: serverTimestamp()
               });
+          } else {
+              // JOIN EXISTING GROUP - CHECK PASSWORD
+              const groupData = groupSnap.data();
+              if (groupData.password !== groupPassword) {
+                  alert("그룹 비밀번호가 일치하지 않습니다.");
+                  return; // Stop execution
+              }
           }
 
+          // Add Member to Group
           const memberRef = doc(db, 'groups', groupName, 'members', newUserId);
           await setDoc(memberRef, {
               id: newUserId,
@@ -250,20 +297,25 @@ function App() {
               joinedAt: serverTimestamp()
           }, { merge: true });
 
+          // Update Local State
           setMyId(newUserId);
           setMyName(name);
           setMyAvatar(avatarSeed);
           setActiveGroupId(groupName);
           setSelectedMemberId(newUserId);
+          addToMyGroups(groupName);
 
           localStorage.setItem('sb_user_id', newUserId);
           localStorage.setItem('sb_user_name', name);
           localStorage.setItem('sb_user_avatar', avatarSeed);
           localStorage.setItem('sb_active_group', groupName);
-      } catch (error) {
+
+      } catch (error: any) {
           console.error("Login Error:", error);
-          if (window.confirm("데이터베이스 연결에 실패했습니다. 설정(API Key)이 올바르지 않을 수 있습니다.\n설정을 초기화하시겠습니까?")) {
-              handleForceReset();
+          if (error.code === 'permission-denied' || error.code === 'unavailable') {
+             setConnectionError(true);
+          } else {
+              alert("로그인 중 오류가 발생했습니다: " + error.message);
           }
       }
   };
@@ -353,27 +405,55 @@ function App() {
       if (!db) return;
       await updateDoc(doc(db, 'groups', id), { name });
   };
+  
+  // "Delete" for user means "Leave" locally
   const handleDeleteGroup = async (id: string) => {
-      if (!db) return;
-      await deleteDoc(doc(db, 'groups', id));
-      setActiveGroupId('');
-      localStorage.removeItem('sb_active_group');
-      window.location.reload();
+      const updated = myGroupIds.filter(gid => gid !== id);
+      setMyGroupIds(updated);
+      localStorage.setItem('sb_my_groups', JSON.stringify(updated));
+
+      // If active group was deleted
+      if (activeGroupId === id) {
+          if (updated.length > 0) {
+              setActiveGroupId(updated[0]);
+              localStorage.setItem('sb_active_group', updated[0]);
+          } else {
+              setActiveGroupId('');
+              localStorage.removeItem('sb_active_group');
+              window.location.reload(); // Force re-login if no groups
+          }
+      }
   };
 
 
   // --- RENDER ---
 
-  // HARD RESET BUTTON (ALWAYS VISIBLE)
+  // HARD RESET BUTTON
   const ResetButton = (
       <button 
         onClick={handleForceReset}
         className="fixed bottom-4 right-4 z-[9999] bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-2 rounded shadow-lg border border-red-400"
-        title="문제가 발생했을 때 누르세요"
+        title="설정 초기화 및 새로고침"
       >
         API KEY RESET
       </button>
   );
+
+  // Error Overlay
+  if (connectionError) {
+      return (
+          <div className="fixed inset-0 bg-gray-900 z-[9999] flex flex-col items-center justify-center p-6 text-center">
+              <h1 className="text-2xl font-bold text-red-500 mb-4">데이터베이스 연결 오류</h1>
+              <p className="text-gray-300 mb-6">API Key가 잘못되었거나 Firestore 권한이 없습니다.<br/>(규칙이 allow read, write: if true; 인지 확인하세요)</p>
+              <button 
+                onClick={handleResetConfig}
+                className="bg-white text-gray-900 font-bold px-6 py-3 rounded-xl hover:bg-gray-200"
+              >
+                  API 키 다시 입력하기
+              </button>
+          </div>
+      );
+  }
 
   if (configMissing) {
       return (
@@ -401,8 +481,11 @@ function App() {
         <GroupHeader 
             groups={groups} 
             activeGroupId={activeGroupId}
-            onSelectGroup={(id) => setActiveGroupId(id)} 
-            onCreateGroup={(name) => handleLogin(myName, name, myAvatar)}
+            onSelectGroup={(id) => {
+                setActiveGroupId(id);
+                localStorage.setItem('sb_active_group', id);
+            }} 
+            onCreateGroup={(name, pwd) => handleLogin(myName, name, pwd, myAvatar)}
             onUpdateGroup={handleUpdateGroup}
             onDeleteGroup={handleDeleteGroup}
         />

@@ -3,6 +3,7 @@ export interface Group {
   id: string;
   name: string;
   color: string;
+  password?: string;
 }
 
 export interface Member {

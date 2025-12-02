@@ -1,12 +1,13 @@
+
 import React, { useState } from 'react';
 import { Group } from '../types';
-import { Plus, Users, ChevronDown, Check, Edit2, Trash2, X } from 'lucide-react';
+import { Plus, Users, ChevronDown, Check, Edit2, Trash2, X, Lock } from 'lucide-react';
 
 interface GroupHeaderProps {
-  groups: Group[];
+  groups: Group[]; // These are "My Groups" now
   activeGroupId: string;
   onSelectGroup: (groupId: string) => void;
-  onCreateGroup: (name: string) => void;
+  onCreateGroup: (name: string, password: string) => void; // Combined create/join handler
   onUpdateGroup: (id: string, name: string) => void;
   onDeleteGroup: (id: string) => void;
 }
@@ -20,8 +21,11 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
   onDeleteGroup
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  
+  // Form State
   const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupPassword, setNewGroupPassword] = useState('');
 
   // Editing State
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -29,18 +33,19 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
 
   const activeGroup = groups.find(g => g.id === activeGroupId);
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (newGroupName.trim()) {
-      onCreateGroup(newGroupName.trim());
+    if (newGroupName.trim() && newGroupPassword.trim()) {
+      onCreateGroup(newGroupName.trim(), newGroupPassword.trim());
       setNewGroupName('');
-      setIsCreating(false);
+      setNewGroupPassword('');
+      setIsAdding(false);
       setIsOpen(false);
     }
   };
 
   const startEditing = (e: React.MouseEvent, group: Group) => {
-    e.stopPropagation(); // Prevent selecting the group
+    e.stopPropagation();
     setEditingGroupId(group.id);
     setEditName(group.name);
   };
@@ -60,7 +65,7 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
 
   const handleDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (window.confirm('정말 이 그룹을 삭제하시겠습니까?')) {
+    if (window.confirm('이 그룹에서 탈퇴(삭제) 하시겠습니까?')) {
       onDeleteGroup(id);
     }
   };
@@ -86,6 +91,7 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
       {isOpen && (
         <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 rounded-xl border border-gray-700 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
           <div className="max-h-60 overflow-y-auto">
+             <div className="px-4 py-2 text-xs text-gray-500 font-bold uppercase tracking-wider bg-gray-900/50">내 그룹 목록</div>
             {groups.map(group => (
               <div
                 key={group.id}
@@ -123,7 +129,6 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
                             {group.id === activeGroupId && <Check size={14} className="text-indigo-400 flex-shrink-0" />}
                         </div>
                         
-                        {/* Action Buttons (Visible on hover) */}
                         <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                             <button 
                                 onClick={(e) => startEditing(e, group)}
@@ -142,32 +147,50 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
                 )}
               </div>
             ))}
+            {groups.length === 0 && (
+                <div className="p-4 text-center text-gray-500 text-sm">
+                    가입된 그룹이 없습니다.
+                </div>
+            )}
           </div>
           
           <div className="p-3 bg-gray-900/50 border-t border-gray-700">
-            {isCreating ? (
-              <form onSubmit={handleCreateSubmit} className="flex gap-2">
+            {isAdding ? (
+              <form onSubmit={handleAddSubmit} className="flex flex-col gap-2 p-1">
+                <div className="flex items-center justify-between">
+                    <span className="text-xs text-white font-bold">새 그룹 생성 또는 가입</span>
+                    <button type="button" onClick={() => setIsAdding(false)} className="text-gray-500"><X size={14} /></button>
+                </div>
                 <input
                   type="text"
                   value={newGroupName}
                   onChange={(e) => setNewGroupName(e.target.value)}
-                  placeholder="새 그룹 이름"
-                  className="flex-1 bg-gray-800 text-sm text-white px-3 py-2 rounded-lg border border-gray-600 focus:outline-none focus:border-indigo-500"
+                  placeholder="그룹 이름"
+                  className="bg-gray-800 text-sm text-white px-3 py-2 rounded-lg border border-gray-600 focus:outline-none focus:border-indigo-500"
                   autoFocus
+                  required
+                />
+                <input
+                  type="password"
+                  value={newGroupPassword}
+                  onChange={(e) => setNewGroupPassword(e.target.value)}
+                  placeholder="그룹 비밀번호"
+                  className="bg-gray-800 text-sm text-white px-3 py-2 rounded-lg border border-gray-600 focus:outline-none focus:border-indigo-500"
+                  required
                 />
                 <button 
                   type="submit"
-                  className="bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg text-xs font-bold"
                 >
-                  만들기
+                  확인 (생성/입장)
                 </button>
               </form>
             ) : (
               <button
-                onClick={() => setIsCreating(true)}
+                onClick={() => setIsAdding(true)}
                 className="w-full flex items-center justify-center gap-2 text-sm text-gray-400 hover:text-white py-1"
               >
-                <Plus size={16} /> 새 그룹 만들기
+                <Plus size={16} /> 새 그룹 추가 (가입/생성)
               </button>
             )}
           </div>
