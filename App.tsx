@@ -63,38 +63,23 @@ function App() {
     localStorage.removeItem('sb_my_groups');
     window.location.reload();
   };
-// --- INITIALIZATION ---
+
+  const handleResetConfig = () => {
+     localStorage.removeItem('sb_firebase_config');
+     setConfigMissing(true);
+     setConnectionError(false);
+  };
+
+  // --- INITIALIZATION ---
   useEffect(() => {
-    // 1. 내 컴퓨터에 저장된 설정이 있는지 확인
     const storedConfig = localStorage.getItem('sb_firebase_config');
-    
-    // 2. Vercel 환경변수에서 가져온 "기본 설정" (손님용)
-    // ★ 중요: 아래 빈칸('')에 본인의 Firebase 값들을 채워 넣으세요! (API Key 빼고)
-    const envConfig = {
-      apiKey: import.meta.env.VITE_GEMINI_API_KEY,
-      authDomain: "studyapp-46ed4.firebaseapp.com", // 예: project-id.firebaseapp.com
-      projectId: "studyapp-46ed4",                // 예: project-id
-      storageBucket: "studyapp-46ed4.firebasestorage.app", // 예: project-id.appspot.com
-      messagingSenderId: "927515414304",        // Firebase 콘솔에서 복사
-      appId: "1:927515414304:web:6c500cae3ed68de920d145"                        // Firebase 콘솔에서 복사
-    };
-
-    // 3. 사용할 설정 결정 (저장된 거 우선 -> 없으면 환경변수 사용)
-    let configToUse = null;
-
     if (storedConfig) {
-      configToUse = JSON.parse(storedConfig);
-    } else if (envConfig.apiKey && envConfig.projectId) {
-      configToUse = envConfig;
-    }
-
-    // 4. 결정된 설정으로 앱 시작
-    if (configToUse) {
         try {
-            if (!configToUse.apiKey || !configToUse.projectId) throw new Error("Invalid Config");
+            const config = JSON.parse(storedConfig);
+            if (!config.apiKey || !config.projectId) throw new Error("Invalid Config");
 
             if (!getApps().length) {
-                const app = initializeApp(configToUse);
+                const app = initializeApp(config);
                 setFirebaseApp(app);
                 setDb(getFirestore(app));
             } else {
@@ -102,19 +87,15 @@ function App() {
                 setFirebaseApp(app);
                 setDb(getFirestore(app));
             }
-            // 환경변수로 자동 로그인된 경우, 입력창 안 뜨게 설정
-            setConfigMissing(false); 
         } catch (e) {
             console.error("Firebase Init Error", e);
             localStorage.removeItem('sb_firebase_config');
             setConfigMissing(true);
         }
     } else {
-        // 둘 다 없으면 입력창 띄우기
         setConfigMissing(true);
     }
 
-    // ... (Restore User Session 코드는 그대로 두세요) ...
     // Restore User Session
     const storedId = localStorage.getItem('sb_user_id');
     const storedName = localStorage.getItem('sb_user_name');
